@@ -5,6 +5,7 @@ import argparse
 import io
 import hashlib
 import concurrent.futures
+import lzma
 from typing import List, Tuple, Dict, Any
 
 try:
@@ -53,6 +54,8 @@ def delta_decode(data: bytes) -> bytearray:
     out[3::4] = m[3*q:length]
     return out
 
+import math
+
 def try_encode_webp(uncomp_data: bytearray) -> bytes:
     """Tenta converter textura raw descomprimida para WebP Lossless"""
     if not HAS_PIL:
@@ -62,17 +65,20 @@ def try_encode_webp(uncomp_data: bytearray) -> bytes:
         return None
         
     if size % 4 == 0:
-        width = size // 4
-        try:
-            img = Image.frombytes('RGBA', (width, 1), uncomp_data)
-            buf = io.BytesIO()
-            img.save(buf, format='webp', lossless=True)
-            webp_data = buf.getvalue()
-            # Só aceitamos se a conversão gerar economia substancial
-            if len(webp_data) < size * 0.8:
-                return webp_data
-        except Exception:
-            pass
+        pixels = size // 4
+        # Tenta adivinhar se é uma textura quadrada perfeita
+        w = int(math.sqrt(pixels))
+        if w * w == pixels:
+            try:
+                img = Image.frombytes('RGBA', (w, w), uncomp_data)
+                buf = io.BytesIO()
+                img.save(buf, format='webp', lossless=True)
+                webp_data = buf.getvalue()
+                # Exige uma economia de pelo menos 30% para valer a pena
+                if len(webp_data) < size * 0.7:
+                    return webp_data
+            except Exception:
+                pass
     return None
 
 def worker_scan(full_data: bytes, start: int, end: int) -> List[Dict]:
@@ -117,16 +123,14 @@ def worker_scan(full_data: bytes, start: int, end: int) -> List[Dict]:
     return results
 
 def worker_compress(chunk_id: int, data: bytes, is_delta: bool, level: int) -> Tuple[int, bool, bytes, int]:
-    """Worker paralelo para compressão Zstd"""
+    """Worker paralelo para compressão LZMA"""
     data_to_compress = delta_encode(data) if is_delta else data
-    cctx = zstd.ZstdCompressor(level=level)
-    comp = cctx.compress(data_to_compress)
+    comp = lzma.compress(data_to_compress, preset=9 | lzma.PRESET_EXTREME)
     return (chunk_id, is_delta, comp, len(data_to_compress))
 
 def worker_decompress(chunk_id: int, compressed_data: bytes, uncompressed_size: int, is_delta: bool) -> Tuple[int, bytes]:
-    """Worker paralelo para descompressão Zstd"""
-    dctx = zstd.ZstdDecompressor()
-    data = dctx.decompress(compressed_data, max_output_size=uncompressed_size)
+    """Worker paralelo para descompressão LZMA"""
+    data = lzma.decompress(compressed_data)
     if is_delta:
         data = delta_decode(data)
     return (chunk_id, data)
@@ -476,9 +480,11 @@ class N64ZContainer:
         z_futures = []
         with concurrent.futures.ProcessPoolExecutor(max_workers=3) as executor:
             # Chunk 1 e 3 sofrem byte shuffling (MIPS 32-bits)
+            # Apenas o Header/Bootcode (Chunk 1) costuma ter muito código MIPS puro
             z_futures.append(executor.submit(worker_compress, 1, chunker.chunk1_header, True, 22))
             z_futures.append(executor.submit(worker_compress, 2, chunker.chunk2_uncompressed, False, 22))
-            z_futures.append(executor.submit(worker_compress, 3, chunker.chunk3_raw, True, 22))
+            # DESATIVANDO o Delta no Chunk 3 (Raw Data) para não destruir compressão de áudio
+            z_futures.append(executor.submit(worker_compress, 3, chunker.chunk3_raw, False, 22))
             
             results = {1: None, 2: None, 3: None}
             for future in concurrent.futures.as_completed(z_futures):
