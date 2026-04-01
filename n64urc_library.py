@@ -43,7 +43,8 @@ class LibraryBackend:
 
     def fetch_game_info(self, game_name):
         if game_name in self.cache:
-            return self.cache[game_name]
+            # Retorna uma cópia para evitar poluir o cache com metadados específicos de um arquivo (como o filename)
+            return self.cache[game_name].copy()
 
         query = urllib.parse.quote(game_name)
         url = f"https://api.rawg.io/api/games?key={API_KEY}&search={query}&platforms=7" # 7 = N64
@@ -77,7 +78,9 @@ class LibraryBackend:
         
         for f in rom_files:
             clean = self.clean_name(f)
-            info = self.fetch_game_info(clean)
+            metadata = self.fetch_game_info(clean)
+            # Garante que temos um dicionário próprio para esta ROM
+            info = metadata.copy()
             info['filename'] = f
             library.append(info)
             
