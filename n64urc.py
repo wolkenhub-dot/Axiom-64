@@ -88,26 +88,27 @@ def delta_decode(data: bytes) -> bytearray:
 
 import math
 
-def try_encode_webp(uncomp_data: bytearray) -> bytes:
+def try_encode_webp(uncomp_data: bytearray) -> Tuple[bytes, str]:
     """Tenta converter textura raw descomprimida para WebP Lossless adivinhando o formato 2D"""
     if not HAS_PIL:
-        return None
+        return None, None
     size = len(uncomp_data)
     # Ignora blocos muito pequenos ou grandes demais (maiores que 128KB não são texturas no N64)
     if size < 512 or size > 131072:
-        return None
+        return None, None
         
     import zlib
     if len(zlib.compress(uncomp_data, level=1)) > size * 0.90:
         # Se os dados não têm nem redundância básica 1D (alta entropia), WebP espacial vai falhar ou travar a CPU
-        return None
+        return None, None
         
     best_webp = None
+    best_mode = None
     best_ratio = 0.85 # Exige uma economia de pelo menos 15% para valer a pena a estrutura extra
     valid_widths = [16, 32, 64] # Limitando matrizes pra evitar hang em código MIPS de alta entropia
     
     def test_compress(mode, w, h):
-        nonlocal best_webp, best_ratio
+        nonlocal best_webp, best_ratio, best_mode
         try:
             img = Image.frombytes(mode, (w, h), uncomp_data)
             buf = io.BytesIO()
@@ -120,6 +121,7 @@ def try_encode_webp(uncomp_data: bytearray) -> bytes:
                 webp_data = buf.getvalue()
                 if len(webp_data) < size * best_ratio:
                     best_webp = webp_data
+                    best_mode = mode
                     best_ratio = len(webp_data) / size
         except Exception: pass
 
@@ -148,7 +150,7 @@ def try_encode_webp(uncomp_data: bytearray) -> bytes:
                 if 4 <= h <= 512:
                     test_compress('RGBA', w, h)
                     
-    return best_webp
+    return best_webp, best_mode
 
 def worker_scan(full_data: bytes, start: int, end: int) -> List[Dict]:
     """Worker paralelo para caça de MIO0 e Yay0 e WebP conversão"""
@@ -172,7 +174,7 @@ def worker_scan(full_data: bytes, start: int, end: int) -> List[Dict]:
                     uncomp, comp_size = Yaz0Codec.decode(full_data, pos)
                     ctype = b'Z'
                     
-                webp_data = try_encode_webp(uncomp)
+                webp_data, webp_mode = try_encode_webp(uncomp)
                 if webp_data:
                     if is_mio: test_size = len(Mio0Codec.encode(uncomp))
                     elif is_yay: test_size = len(Yay0Codec.encode(uncomp))
@@ -180,9 +182,9 @@ def worker_scan(full_data: bytes, start: int, end: int) -> List[Dict]:
                     
                     if test_size <= comp_size:
                         final_data = webp_data
-                        if is_mio: ctype = b'W'
-                        elif is_yay: ctype = b'X'
-                        else: ctype = b'V'
+                        if is_mio: ctype = b'1' if webp_mode == 'L' else (b'2' if webp_mode == 'LA' else b'3')
+                        elif is_yay: ctype = b'4' if webp_mode == 'L' else (b'5' if webp_mode == 'LA' else b'6')
+                        else: ctype = b'7' if webp_mode == 'L' else (b'8' if webp_mode == 'LA' else b'9')
                     else:
                         final_data = full_data[pos : pos + comp_size]
                 else:
@@ -223,19 +225,29 @@ def worker_decompress(chunk_id: int, compressed_data: bytes, uncompressed_size: 
 def worker_reconstruct(offset: int, comp_size: int, ctype: bytes, chunk2_data: bytes) -> Tuple[int, int, bytes]:
     """Worker paralelo para desfazer texturas WebP e recomprimir LZ77 MIO0/Yay0"""
     try:
-        if ctype in [b'W', b'X', b'V']:
+        is_webp = ctype in [b'1', b'2', b'3', b'4', b'5', b'6', b'7', b'8', b'9']
+        
+        if is_webp:
             if not HAS_PIL:
                 raise Exception("Biblioteca Pillow ausente para decodificar textura WebP.")
+            
+            webp_mode = 'L' if ctype in [b'1', b'4', b'7'] else ('LA' if ctype in [b'2', b'5', b'8'] else 'RGBA')
+            
             buf = io.BytesIO(chunk2_data)
             img = Image.open(buf)
+            img = img.convert(webp_mode)
             uncomp_data = img.tobytes()
         else:
             uncomp_data = chunk2_data
             
-        if ctype in [b'M', b'W']:
+        is_mio = ctype in [b'M', b'1', b'2', b'3']
+        is_yay = ctype in [b'Y', b'4', b'5', b'6']
+        is_yaz = ctype in [b'Z', b'7', b'8', b'9']
+        
+        if is_mio:
             if ctype == b'M': recomp_block = chunk2_data
             else: recomp_block = Mio0Codec.encode(uncomp_data, original_compressed_size=comp_size)
-        elif ctype in [b'Y', b'X']:
+        elif is_yay:
             if ctype == b'Y': recomp_block = chunk2_data
             else: recomp_block = Yay0Codec.encode(uncomp_data, original_compressed_size=comp_size)
         else:
