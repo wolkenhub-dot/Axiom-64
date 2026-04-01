@@ -72,7 +72,6 @@ class LibraryBackend:
                             "background_image": best_res.get("background_image"),
                             "slug": best_res.get("slug", game_name.lower().replace(" ", "-"))
                         }
-                        # Cache locking would be good here but dict is thread-safe in CPython for simple ops
                         self.cache[game_name] = info
                         return info.copy()
         except: pass
@@ -85,13 +84,11 @@ class LibraryBackend:
         
         rom_files = sorted([f for f in os.listdir(ROM_DIR) if f.lower().endswith(".n64z")])
         
-        # Carregamento paralelo para máxima velocidade
         def process_one(f):
             clean = self.clean_name(f)
             metadata = self.fetch_game_info(clean)
             return (f, metadata)
 
-        # ThreadPoolExecutor acelera em até 5x o carregamento inicial
         with ThreadPoolExecutor(max_workers=10) as executor:
             results = list(executor.map(process_one, rom_files))
 
@@ -103,7 +100,7 @@ class LibraryBackend:
                 games_map[slug]['files'] = []
             games_map[slug]['files'].append(f)
             
-        self.save_cache() # Salva tudo de uma vez
+        self.save_cache()
         return sorted(list(games_map.values()), key=lambda x: x['name'])
 
 # --- SERVER LOGIC ---
@@ -115,234 +112,201 @@ HTML_CONTENT = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sua Biblioteca N64 - Axiom-64</title>
-    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Press+Start+2P&family=Outfit:wght@300;600&display=swap" rel="stylesheet">
+    <title>Axiom-64 Vault</title>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Outfit:wght@300;600&display=swap" rel="stylesheet">
     <style>
         :root {
-            --neon-blue: #00f2ff;
+            --n64-gray: #7a7a7a;
+            --n64-dark-gray: #4d4d4d;
             --n64-red: #ff0000;
             --n64-yellow: #ffcc00;
-            --glass: rgba(0, 0, 0, 0.85);
+            --neon-blue: #00f2ff;
         }
 
         body {
             margin: 0;
-            background: #050505 url('bg.png') no-repeat center center fixed;
-            background-size: cover;
-            color: white;
+            background: #020202;
+            color: #ccc;
             font-family: 'Outfit', sans-serif;
             overflow-x: hidden;
-            -webkit-font-smoothing: antialiased;
-        }
-
-        /* Efeito CRT Leve e Veloz */
-        .crt-overlay {
-            position: fixed;
-            top: 0; left: 0; width: 100%; height: 100%;
-            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.1) 50%);
-            background-size: 100% 4px;
-            pointer-events: none;
-            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
         }
 
         header {
-            padding: 25px;
+            padding: 40px;
             text-align: center;
-            background: rgba(0,0,0,0.7);
-            backdrop-filter: blur(8px);
-            border-bottom: 2px solid var(--n64-red);
-            box-shadow: 0 5px 20px rgba(0,0,0,0.8);
+            border-bottom: 1px solid #1a1a1a;
         }
 
         h1 {
-            font-family: 'Press Start 2P', cursive;
-            font-size: 1.5rem;
+            font-family: 'Orbitron', sans-serif;
+            font-size: 1.2rem;
+            letter-spacing: 5px;
+            color: #555;
             margin: 0;
-            color: var(--n64-yellow);
-            text-shadow: 2px 2px var(--n64-red);
-            letter-spacing: -1px;
+            text-transform: uppercase;
         }
 
         .container {
             max-width: 1400px;
-            margin: 30px auto;
-            padding: 0 20px;
+            margin: 50px auto;
+            padding: 20px;
+            flex: 1;
         }
 
+        /* 3D Cartridge Grid */
         .grid {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-            gap: 25px;
+            grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+            gap: 60px;
+            perspective: 1000px;
         }
 
-        .card {
-            background: var(--glass);
-            border: 1px solid #333;
-            border-radius: 8px;
-            overflow: hidden;
-            transition: transform 0.2s, border-color 0.2s;
+        .cartridge-wrap {
+            position: relative;
             cursor: pointer;
+            transition: 0.4s;
+            transform-style: preserve-3d;
+        }
+
+        .cartridge-wrap:hover {
+            transform: translateY(-20px) rotateX(10deg);
+        }
+
+        /* N64 Cartridge Shape CSS */
+        .cartridge {
             position: relative;
+            width: 200px;
+            height: 150px;
+            background: var(--n64-gray);
+            border-radius: 10px 10px 5px 5px;
+            box-shadow: 
+                inset 0 10px 20px rgba(255,255,255,0.1),
+                0 15px 30px rgba(0,0,0,0.8);
+            overflow: hidden;
+            border: 2px solid #555;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
         }
 
-        .card:hover {
-            transform: scale(1.03);
-            border-color: var(--neon-blue);
-        }
-
-        .card-img-wrap {
-            position: relative;
-            height: 360px;
-            background: #111;
-        }
-
-        .card img {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-            transition: 0.3s opacity;
-        }
-
-        .version-badge {
+        /* Top Curved Part */
+        .cartridge::before {
+            content: '';
             position: absolute;
-            top: 10px; right: 10px;
+            top: -5px; width: 80%; height: 20px;
+            background: var(--n64-dark-gray);
+            border-radius: 50%;
+            z-index: 0;
+        }
+
+        .label {
+            width: 80%;
+            height: 60%;
+            background: #111;
+            margin-top: 25px;
+            border-radius: 4px;
+            border: 2px solid #222;
+            z-index: 1;
+            background-size: cover;
+            background-position: center;
+            box-shadow: inset 0 0 10px rgba(0,0,0,0.5);
+            transition: 0.3s;
+        }
+
+        .cartridge-wrap:hover .label {
+            filter: brightness(1.2);
+        }
+
+        .cart-info {
+            margin-top: 15px;
+            text-align: center;
+            font-family: 'Orbitron', sans-serif;
+            font-size: 0.7rem;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            transition: 0.3s;
+        }
+
+        .cartridge-wrap:hover .cart-info {
+            color: #fff;
+        }
+
+        .count-badge {
+            position: absolute;
+            bottom: -5px; right: -5px;
             background: var(--n64-red);
             color: white;
-            padding: 4px 8px;
-            font-family: 'Press Start 2P', cursive;
-            font-size: 0.5rem;
-            border-radius: 3px;
-            box-shadow: 1px 1px 0 #800;
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 50%;
+            z-index: 10;
         }
 
-        .card-info {
-            padding: 15px;
-            text-align: center;
-        }
-
-        .card-info h3 {
-            margin: 0;
-            font-family: 'Orbitron', sans-serif;
-            font-size: 0.9rem;
-            color: #fff;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-
-        /* Modal Slim */
+        /* Modal Minimalist */
         #modal {
             display: none;
             position: fixed;
             top: 0; left: 0; width: 100%; height: 100%;
             background: rgba(0,0,0,0.9);
             z-index: 2000;
-            backdrop-filter: blur(10px);
-            align-items: center;
-            justify-content: center;
+            backdrop-filter: blur(20px);
+            align-items: center; justify-content: center;
         }
 
         .modal-content {
-            width: 90%;
-            max-width: 900px;
-            display: flex;
-            background: #0d0d0d;
-            border: 3px solid var(--n64-red);
-            border-radius: 12px;
-            position: relative;
-            box-shadow: 0 0 40px rgba(255,0,0,0.3);
-            overflow: hidden;
-        }
-
-        .modal-img {
-            width: 40%;
-            background-size: cover;
-            background-position: center;
-        }
-
-        .modal-text {
-            width: 60%;
+            background: #0a0a0a;
+            width: 85%; max-width: 600px;
             padding: 40px;
-            max-height: 80vh;
-            overflow-y: auto;
-        }
-
-        .modal-text h2 {
-            font-family: 'Orbitron', sans-serif;
-            font-size: 1.8rem;
-            color: var(--n64-yellow);
-            margin-top: 0;
-        }
-
-        .file-list {
-            margin-top: 25px;
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
-        }
-
-        .file-item {
-            background: #181818;
-            border: 1px solid #333;
-            padding: 12px 15px;
-            border-radius: 6px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .btn-play-small {
-            background: var(--n64-red);
-            color: white;
-            border: none;
-            padding: 8px 15px;
-            font-family: 'Press Start 2P', cursive;
-            font-size: 0.6rem;
-            cursor: pointer;
-            border-radius: 4px;
-            box-shadow: 2px 2px 0 #800;
-        }
-
-        .btn-play-small:hover { background: #ff4d4d; }
-
-        .close-btn {
-            position: absolute;
-            top: 15px; right: 20px;
-            color: white;
-            font-size: 2rem;
-            cursor: pointer;
-            z-index: 100;
-        }
-
-        .loading {
+            border: 1px solid #222;
+            border-radius: 10px;
             text-align: center;
-            font-family: 'Press Start 2P', cursive;
-            color: var(--neon-blue);
-            margin-top: 120px;
         }
+
+        h2 { font-family: 'Orbitron'; font-size: 1.5rem; color: #fff; margin-bottom: 5px; }
+        .meta { font-size: 0.8rem; color: #555; margin-bottom: 30px; }
+
+        .file-list { display: flex; flex-direction: column; gap: 10px; }
+        .file-item {
+            background: #111; border: 1px solid #1a1a1a;
+            padding: 15px; border-radius: 5px;
+            display: flex; justify-content: space-between; align-items: center;
+            transition: 0.2s;
+        }
+        .file-item:hover { border-color: var(--n64-red); }
+
+        .btn-play {
+            background: #333; color: #fff; border: none;
+            padding: 8px 20px; font-family: 'Orbitron'; font-size: 0.7rem;
+            cursor: pointer; border-radius: 3px; transition: 0.3s;
+        }
+        .btn-play:hover { background: var(--n64-red); }
+
+        .close-btn { position: absolute; top: 20px; right: 20px; color: #333; cursor: pointer; font-size: 2rem; }
+        .close-btn:hover { color: #fff; }
+
+        .loading { font-family: 'Orbitron'; letter-spacing: 5px; color: #222; margin-top: 200px; text-align: center; }
     </style>
 </head>
 <body>
-    <div class="crt-overlay"></div>
     <header>
-        <h1>BIBLIOTECA AXIOM-64</h1>
+        <h1>Axiom-64 Collection</h1>
     </header>
 
     <div class="container">
-        <div id="loader" class="loading">CALIBRANDO CARTUCHOS...</div>
+        <div id="loader" class="loading">SCANNING SYSTEM...</div>
         <div id="grid" class="grid"></div>
     </div>
 
     <div id="modal">
         <span class="close-btn" onclick="closeModal()">&times;</span>
         <div class="modal-content">
-            <div class="modal-img" id="m-img"></div>
-            <div class="modal-text">
-                <h2 id="m-title">Título do Jogo</h2>
-                <div style="color: #aaa; font-size: 0.9rem" id="m-meta">Carregando...</div>
-                <div style="font-family: 'Orbitron'; color: var(--neon-blue); margin-top:25px; font-size: 0.8rem">VERSÕES DISPONÍVEIS:</div>
-                <div class="file-list" id="m-files"></div>
-            </div>
+            <h2 id="m-title">Game Title</h2>
+            <div class="meta" id="m-meta">YEAR | RATING</div>
+            <div class="file-list" id="m-files"></div>
         </div>
     </div>
 
@@ -357,7 +321,7 @@ HTML_CONTENT = """
                 renderGrid(data);
                 document.getElementById('loader').style.display = 'none';
             } catch(e) {
-                document.getElementById('loader').innerText = 'ERRO AO CARREGAR BIBLIOTECA';
+                document.getElementById('loader').innerText = 'ERROR';
             }
         }
 
@@ -368,14 +332,12 @@ HTML_CONTENT = """
                 const img = game.background_image || '';
                 const vCount = game.files.length;
                 grid.innerHTML += `
-                    <div class="card" onclick="openModal(${index})">
-                        <div class="card-img-wrap">
-                            ${vCount > 1 ? `<div class="version-badge">${vCount} ROMS</div>` : ''}
-                            ${img ? `<img src="${img}" alt="${game.name}">` : '<div style="padding:100px 0; text-align:center; color:#444">SEM CAPA</div>'}
+                    <div class="cartridge-wrap" onclick="openModal(${index})">
+                        <div class="cartridge">
+                            <div class="label" style="background-image: url('${img}')"></div>
                         </div>
-                        <div class="card-info">
-                            <h3>${game.name}</h3>
-                        </div>
+                        ${vCount > 1 ? `<div class="count-badge">${vCount}</div>` : ''}
+                        <div class="cart-info">${game.name}</div>
                     </div>
                 `;
             });
@@ -384,55 +346,41 @@ HTML_CONTENT = """
         function openModal(index) {
             const game = currentGames[index];
             document.getElementById('m-title').innerText = game.name;
-            document.getElementById('m-meta').innerText = `Lançamento: ${game.released} | Avaliação: ★ ${game.rating}`;
-            document.getElementById('m-img').style.backgroundImage = game.background_image ? `url(${game.background_image})` : 'none';
+            document.getElementById('m-meta').innerText = `${game.released} | ★ ${game.rating}`;
             
             const fileList = document.getElementById('m-files');
             fileList.innerHTML = '';
             game.files.forEach(filename => {
                 fileList.innerHTML += `
                     <div class="file-item">
-                        <div style="font-size: 0.8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 260px">
-                            ${filename}
-                        </div>
-                        <button class="btn-play-small" onclick="playGame('${index}', '${filename}', this)">JOGAR</button>
+                        <div style="font-size: 0.8rem; color: #888">${filename}</div>
+                        <button class="btn-play" onclick="playGame('${filename}', this)">JOGAR</button>
                     </div>
                 `;
             });
             document.getElementById('modal').style.display = 'flex';
         }
 
-        function closeModal() {
-            document.getElementById('modal').style.display = 'none';
-        }
+        function closeModal() { document.getElementById('modal').style.display = 'none'; }
 
-        async function playGame(index, filename, btn) {
-            const originalText = btn.innerText;
+        async function playGame(filename, btn) {
             btn.innerText = 'AGUARDE';
-            btn.disabled = true;
             try {
                 await fetch(`/api/play?file=${encodeURIComponent(filename)}`);
             } finally {
-                setTimeout(() => {
-                    btn.innerText = originalText;
-                    btn.disabled = false;
-                }, 1500);
+                setTimeout(() => { btn.innerText = 'JOGAR'; }, 1000);
             }
         }
 
         loadLibrary();
-
-        // Atalho ESC para fechar modal
-        window.addEventListener('keydown', (e) => {
-            if(e.key === 'Escape') closeModal();
-        });
+        window.addEventListener('keydown', (e) => { if(e.key === 'Escape') closeModal(); });
     </script>
 </body>
 </html>
 """
 
 class RequestHandler(http.server.BaseHTTPRequestHandler):
-    def log_message(self, format, *args): return # Silencia logs para ser "leve" no terminal
+    def log_message(self, format, *args): return
 
     def do_GET(self):
         parsed_path = urllib.parse.urlparse(self.path)
@@ -441,14 +389,6 @@ class RequestHandler(http.server.BaseHTTPRequestHandler):
             self.send_header('Content-type', 'text/html; charset=utf-8')
             self.end_headers()
             self.wfile.write(HTML_CONTENT.encode())
-        elif parsed_path.path == '/bg.png':
-            try:
-                with open('bg.png', 'rb') as f:
-                    self.send_response(200)
-                    self.send_header('Content-type', 'image/png')
-                    self.end_headers()
-                    self.wfile.write(f.read())
-            except: self.send_error(404)
         elif parsed_path.path == '/api/roms':
             data = backend.scan_roms()
             self.send_response(200)
@@ -476,8 +416,7 @@ if __name__ == "__main__":
     server_thread.start()
     time.sleep(0.5)
     webbrowser.open(f"http://localhost:{PORT}")
-    print(f"🚀 Biblioteca Ativa em http://localhost:{PORT}")
-    print("Mantenha este terminal aberto.")
+    print(f"🚀 Axiom-64 Vault Active: http://localhost:{PORT}")
     try:
         while True: time.sleep(1)
     except KeyboardInterrupt: pass
