@@ -123,12 +123,19 @@ def worker_scan(full_data: bytes, start: int, end: int) -> List[Dict]:
                     
                 webp_data = try_encode_webp(uncomp)
                 if webp_data:
-                    final_data = webp_data
-                    if is_mio: ctype = b'W'
-                    elif is_yay: ctype = b'X'
-                    else: ctype = b'V'
+                    if is_mio: test_size = len(Mio0Codec.encode(uncomp))
+                    elif is_yay: test_size = len(Yay0Codec.encode(uncomp))
+                    else: test_size = len(Yaz0Codec.encode(uncomp))
+                    
+                    if test_size <= comp_size:
+                        final_data = webp_data
+                        if is_mio: ctype = b'W'
+                        elif is_yay: ctype = b'X'
+                        else: ctype = b'V'
+                    else:
+                        final_data = full_data[pos : pos + comp_size]
                 else:
-                    final_data = uncomp
+                    final_data = full_data[pos : pos + comp_size]
                     
                 results.append({
                     'offset': pos,
@@ -172,11 +179,14 @@ def worker_reconstruct(offset: int, comp_size: int, ctype: bytes, chunk2_data: b
             uncomp_data = chunk2_data
             
         if ctype in [b'M', b'W']:
-            recomp_block = Mio0Codec.encode(uncomp_data, original_compressed_size=comp_size)
+            if ctype == b'M': recomp_block = chunk2_data
+            else: recomp_block = Mio0Codec.encode(uncomp_data, original_compressed_size=comp_size)
         elif ctype in [b'Y', b'X']:
-            recomp_block = Yay0Codec.encode(uncomp_data, original_compressed_size=comp_size)
+            if ctype == b'Y': recomp_block = chunk2_data
+            else: recomp_block = Yay0Codec.encode(uncomp_data, original_compressed_size=comp_size)
         else:
-            recomp_block = Yaz0Codec.encode(uncomp_data, original_compressed_size=comp_size)
+            if ctype == b'Z': recomp_block = chunk2_data
+            else: recomp_block = Yaz0Codec.encode(uncomp_data, original_compressed_size=comp_size)
             
         if len(recomp_block) > comp_size:
             recomp_block = recomp_block[:comp_size]
