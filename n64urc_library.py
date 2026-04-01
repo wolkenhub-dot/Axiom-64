@@ -10,6 +10,7 @@ import socketserver
 import threading
 import time
 import re
+import difflib
 import webbrowser
 from pathlib import Path
 
@@ -51,22 +52,35 @@ class LibraryBackend:
             with urllib.request.urlopen(url) as response:
                 data = json.loads(response.read().decode())
                 if data['results']:
-                    # Tenta encontrar um match mais preciso comparando o nome
-                    res = data['results'][0]
-                    # Se o primeiro resultado for muito diferente, talvez a busca fuzzy falhou
-                    info = {
-                        "name": res.get("name", game_name),
-                        "released": res.get("released", "Desconhecido"),
-                        "rating": res.get("rating", 0),
-                        "background_image": res.get("background_image"),
-                        "slug": res.get("slug", game_name.lower().replace(" ", "-"))
-                    }
-                    self.cache[game_name] = info
-                    self.save_cache()
-                    return info.copy()
+                    # Procura o melhor match entre os primeiros resultados
+                    best_res = None
+                    best_score = 0
+                    
+                    for res in data['results'][:5]:
+                        res_name = res.get("name", "")
+                        # Calcula a similaridade (0.0 a 1.0)
+                        score = difflib.SequenceMatcher(None, game_name.lower(), res_name.lower()).ratio()
+                        if score > best_score:
+                            best_score = score
+                            best_res = res
+                    
+                    # Só aceita se a similaridade for razoável (ex: > 0.4)
+                    # ou se o nome for quase idêntico
+                    if best_res and best_score > 0.4:
+                        info = {
+                            "name": best_res.get("name", game_name),
+                            "released": best_res.get("released", "Desconhecido"),
+                            "rating": best_res.get("rating", 0),
+                            "background_image": best_res.get("background_image"),
+                            "slug": best_res.get("slug", game_name.lower().replace(" ", "-"))
+                        }
+                        self.cache[game_name] = info
+                        self.save_cache()
+                        return info.copy()
         except Exception as e:
             print(f"Erro ao buscar RAWG para {game_name}: {e}")
         
+        # Fallback se nada for encontrado ou se a similaridade for muito baixa
         return {"name": game_name, "released": "N/A", "rating": 0, "background_image": None, "slug": game_name.lower().replace(" ", "-")}
 
     def scan_roms(self):
