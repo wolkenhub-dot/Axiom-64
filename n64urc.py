@@ -153,7 +153,7 @@ def try_encode_webp(uncomp_data: bytearray) -> Tuple[bytes, str]:
     return best_webp, best_mode
 
 def worker_scan(full_data: bytes, start: int, end: int) -> List[Dict]:
-    """Worker paralelo para caça de MIO0 e Yay0 e WebP conversão"""
+    """Identifica blocos LZ77 (MIO0/Yay0/Yaz0) na ROM para mapeamento estrutural."""
     results = []
     pos = start
     while pos < end:
@@ -173,16 +173,10 @@ def worker_scan(full_data: bytes, start: int, end: int) -> List[Dict]:
                 else:
                     uncomp, comp_size = Yaz0Codec.decode(full_data, pos)
                     ctype = b'Z'
-                    
-                webp_data, webp_mode = try_encode_webp(uncomp)
-                # Aceitar WebP diretamente se for menor que os dados originais — sem re-encode Python!
-                if webp_data and len(webp_data) < comp_size:
-                    final_data = webp_data
-                    if is_mio: ctype = b'1' if webp_mode == 'L' else (b'2' if webp_mode == 'LA' else b'3')
-                    elif is_yay: ctype = b'4' if webp_mode == 'L' else (b'5' if webp_mode == 'LA' else b'6')
-                    else: ctype = b'7' if webp_mode == 'L' else (b'8' if webp_mode == 'LA' else b'9')
-                else:
-                    final_data = full_data[pos : pos + comp_size]
+                
+                # Sem WebP: store os dados originais comprimidos diretamente
+                # LZMA2+FilterDelta vai comprimir o Chunk3 (raw) muito melhor que WebP
+                final_data = full_data[pos : pos + comp_size]
                     
                 results.append({
                     'offset': pos,
@@ -192,13 +186,13 @@ def worker_scan(full_data: bytes, start: int, end: int) -> List[Dict]:
                     'type': ctype,
                     'data': final_data
                 })
-                # Evitar detecções que estão dentro do payload do chunk atual
                 pos += comp_size
                 continue
             except Exception:
                 pass
         pos += 4
     return results
+
 
 def worker_compress(chunk_id: int, data: bytes, is_delta: bool, level: int) -> Tuple[int, bool, bytes, int]:
     """Worker paralelo para compressão LZMA com Delta Filter nativo em C"""
