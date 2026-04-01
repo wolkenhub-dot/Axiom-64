@@ -39,7 +39,7 @@ class StdoutRedirector:
 class N64URCGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("N64-URC God Tier Compressor")
+        self.root.title("Axios 64 - Compressor N64")
         self.root.geometry("600x570")
         self.root.resizable(False, False)
         self.root.configure(bg=BG_COLOR)
@@ -58,7 +58,7 @@ class N64URCGUI:
         
         lbl_title = tk.Label(
             header_frame, 
-            text="N64-URC : GOD TIER COMPRESSOR", 
+            text="AXIOS 64 : COMPRESSOR N64", 
             fg=BTN_TEXT_YELLOW, 
             bg=BG_COLOR, 
             font=FONT_TITLE
@@ -78,21 +78,21 @@ class N64URCGUI:
         self.var_path = tk.StringVar(value="")
 
         # Mode Selection
-        mode_lf = tk.LabelFrame(config_frame, text=" [ MODE SELECTION ] ", fg=FG_COLOR, bg=BG_COLOR, font=FONT_MAIN, relief=tk.SOLID, bd=2)
+        mode_lf = tk.LabelFrame(config_frame, text=" [ SELEÇÃO DE MODO ] ", fg=FG_COLOR, bg=BG_COLOR, font=FONT_MAIN, relief=tk.SOLID, bd=2)
         mode_lf.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
 
-        tk.Radiobutton(mode_lf, text="Compress (Z64 -> N64Z)", variable=self.var_mode, value="compress", 
+        tk.Radiobutton(mode_lf, text="Comprimir (ROM -> N64Z)", variable=self.var_mode, value="compress", 
                        fg=FG_COLOR, bg=BG_COLOR, selectcolor="#333", font=FONT_MAIN, activebackground=BG_COLOR, activeforeground=FG_COLOR).pack(anchor=tk.W, padx=10, pady=5)
-        tk.Radiobutton(mode_lf, text="Extract (N64Z -> Z64)", variable=self.var_mode, value="extract", 
+        tk.Radiobutton(mode_lf, text="Extrair (N64Z -> ROM)", variable=self.var_mode, value="extract", 
                        fg=FG_COLOR, bg=BG_COLOR, selectcolor="#333", font=FONT_MAIN, activebackground=BG_COLOR, activeforeground=FG_COLOR).pack(anchor=tk.W, padx=10, pady=5)
 
         # Target Selection
-        target_lf = tk.LabelFrame(config_frame, text=" [ TARGET TARGET ] ", fg=FG_COLOR, bg=BG_COLOR, font=FONT_MAIN, relief=tk.SOLID, bd=2)
+        target_lf = tk.LabelFrame(config_frame, text=" [ TIPO DE ALVO ] ", fg=FG_COLOR, bg=BG_COLOR, font=FONT_MAIN, relief=tk.SOLID, bd=2)
         target_lf.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(5, 0))
 
-        tk.Radiobutton(target_lf, text="Single File", variable=self.var_target, value="single", 
+        tk.Radiobutton(target_lf, text="Arquivo Único", variable=self.var_target, value="single", 
                        fg=FG_COLOR, bg=BG_COLOR, selectcolor="#333", font=FONT_MAIN, command=self.on_target_change, activebackground=BG_COLOR, activeforeground=FG_COLOR).pack(anchor=tk.W, padx=10, pady=5)
-        tk.Radiobutton(target_lf, text="Fullset Batch", variable=self.var_target, value="batch", 
+        tk.Radiobutton(target_lf, text="Lote (Pasta Completa)", variable=self.var_target, value="batch", 
                        fg=FG_COLOR, bg=BG_COLOR, selectcolor="#333", font=FONT_MAIN, command=self.on_target_change, activebackground=BG_COLOR, activeforeground=FG_COLOR).pack(anchor=tk.W, padx=10, pady=5)
 
         # 3. PATH INPUTS
@@ -102,11 +102,11 @@ class N64URCGUI:
         self.entry_path = tk.Entry(path_frame, textvariable=self.var_path, state='readonly', font=FONT_MAIN, bg="#333", fg=FG_COLOR, relief=tk.SOLID, bd=2)
         self.entry_path.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=4)
 
-        self.btn_browse = tk.Button(path_frame, text="BROWSE", bg=BTN_BLUE, fg=FG_COLOR, font=FONT_MAIN, relief=tk.SOLID, bd=2, command=self.browse_path)
+        self.btn_browse = tk.Button(path_frame, text="PROCURAR", bg=BTN_BLUE, fg=FG_COLOR, font=FONT_MAIN, relief=tk.SOLID, bd=2, command=self.browse_path)
         self.btn_browse.pack(side=tk.RIGHT, padx=(10, 0), ipadx=10, ipady=2)
 
         # 4. MAIN BUTTON
-        self.btn_start = tk.Button(self.root, text=">> START PROCESSING <<", bg=BTN_RED, fg=BTN_TEXT_YELLOW, font=("Fixedsys", 16, "bold"), relief=tk.SOLID, bd=4, command=self.start_processing)
+        self.btn_start = tk.Button(self.root, text=">> INICIAR PROCESSAMENTO <<", bg=BTN_RED, fg=BTN_TEXT_YELLOW, font=("Fixedsys", 16, "bold"), relief=tk.SOLID, bd=4, command=self.start_processing)
         self.btn_start.pack(fill=tk.X, padx=15, pady=10, ipady=10)
 
         # 5. CRT MONITOR (Terminal)
@@ -130,9 +130,9 @@ class N64URCGUI:
     def browse_path(self):
         target = self.var_target.get()
         if target == "single":
-            path = filedialog.askopenfilename(title="Select File", filetypes=[("N64 ROMs", "*.z64 *.n64 *.v64 *.rom *.n64z"), ("All Files", "*.*")])
+            path = filedialog.askopenfilename(title="Selecionar Arquivo", filetypes=[("N64 ROMs", "*.z64 *.n64 *.v64 *.rom *.n64z"), ("Todos os Arquivos", "*.*")])
         else:
-            path = filedialog.askdirectory(title="Select Folder")
+            path = filedialog.askdirectory(title="Selecionar Pasta")
         
         if path:
             self.var_path.set(os.path.normpath(path))
@@ -286,7 +286,7 @@ class N64URCGUI:
         else:
             self.progress.config(value=self.progress['maximum']) # Completa
             
-        self.write_crt("\n>>> JOB FINISHED <<<\n")
+        self.write_crt("\n>>> TRABALHO CONCLUÍDO <<<\n")
         self.toggle_ui(True)
 
         try:
