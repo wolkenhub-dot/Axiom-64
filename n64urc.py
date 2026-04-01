@@ -175,18 +175,12 @@ def worker_scan(full_data: bytes, start: int, end: int) -> List[Dict]:
                     ctype = b'Z'
                     
                 webp_data, webp_mode = try_encode_webp(uncomp)
-                if webp_data:
-                    if is_mio: test_size = len(Mio0Codec.encode(uncomp))
-                    elif is_yay: test_size = len(Yay0Codec.encode(uncomp))
-                    else: test_size = len(Yaz0Codec.encode(uncomp))
-                    
-                    if test_size <= comp_size:
-                        final_data = webp_data
-                        if is_mio: ctype = b'1' if webp_mode == 'L' else (b'2' if webp_mode == 'LA' else b'3')
-                        elif is_yay: ctype = b'4' if webp_mode == 'L' else (b'5' if webp_mode == 'LA' else b'6')
-                        else: ctype = b'7' if webp_mode == 'L' else (b'8' if webp_mode == 'LA' else b'9')
-                    else:
-                        final_data = full_data[pos : pos + comp_size]
+                # Aceitar WebP diretamente se for menor que os dados originais — sem re-encode Python!
+                if webp_data and len(webp_data) < comp_size:
+                    final_data = webp_data
+                    if is_mio: ctype = b'1' if webp_mode == 'L' else (b'2' if webp_mode == 'LA' else b'3')
+                    elif is_yay: ctype = b'4' if webp_mode == 'L' else (b'5' if webp_mode == 'LA' else b'6')
+                    else: ctype = b'7' if webp_mode == 'L' else (b'8' if webp_mode == 'LA' else b'9')
                 else:
                     final_data = full_data[pos : pos + comp_size]
                     
@@ -207,19 +201,23 @@ def worker_scan(full_data: bytes, start: int, end: int) -> List[Dict]:
     return results
 
 def worker_compress(chunk_id: int, data: bytes, is_delta: bool, level: int) -> Tuple[int, bool, bytes, int]:
-    """Worker paralelo para compressão LZMA"""
-    data_to_compress = delta_encode(data) if is_delta else data
-    lzma_filters = [
-        {"id": lzma.FILTER_LZMA2, "preset": 9 | lzma.PRESET_EXTREME, "dict_size": 32 * 1024 * 1024, "lc": 3, "lp": 0, "pb": 2}
-    ]
-    comp = lzma.compress(data_to_compress, format=lzma.FORMAT_XZ, filters=lzma_filters)
-    return (chunk_id, is_delta, comp, len(data_to_compress))
+    """Worker paralelo para compressão LZMA com Delta Filter nativo em C"""
+    if is_delta:
+        # lzma.FILTER_DELTA dist=4 é 100% C, alinhado com MIPS 32-bit — sem custo Python
+        lzma_filters = [
+            {"id": lzma.FILTER_DELTA, "dist": 4},
+            {"id": lzma.FILTER_LZMA2, "preset": 9 | lzma.PRESET_EXTREME, "dict_size": 64 * 1024 * 1024, "lc": 3, "lp": 0, "pb": 2}
+        ]
+    else:
+        lzma_filters = [
+            {"id": lzma.FILTER_LZMA2, "preset": 9 | lzma.PRESET_EXTREME, "dict_size": 64 * 1024 * 1024, "lc": 3, "lp": 0, "pb": 2}
+        ]
+    comp = lzma.compress(bytes(data), format=lzma.FORMAT_XZ, filters=lzma_filters)
+    return (chunk_id, is_delta, comp, len(data))
 
 def worker_decompress(chunk_id: int, compressed_data: bytes, uncompressed_size: int, is_delta: bool) -> Tuple[int, bytes]:
-    """Worker paralelo para descompressão LZMA"""
+    """Worker paralelo para descompressão LZMA — delta é desfeito automaticamente pelo filtro C"""
     data = lzma.decompress(compressed_data)
-    if is_delta:
-        data = delta_decode(data)
     return (chunk_id, data)
 
 def worker_reconstruct(offset: int, comp_size: int, ctype: bytes, chunk2_data: bytes) -> Tuple[int, int, bytes]:
@@ -704,10 +702,12 @@ class N64ZContainer:
         with concurrent.futures.ProcessPoolExecutor(max_workers=3) as executor:
             # Chunk 1 e 3 sofrem byte shuffling (MIPS 32-bits)
             # Apenas o Header/Bootcode (Chunk 1) costuma ter muito código MIPS puro
+            # Chunk1 (bootcode MIPS) e Chunk3 (raw MIPS) usam FILTER_DELTA dist=4 em C puro
             z_futures.append(executor.submit(worker_compress, 1, chunker.chunk1_header, True, 22))
+            # Chunk2 (texturas WebP + dados descomprimidos) — sem delta para preservar dados visuais
             z_futures.append(executor.submit(worker_compress, 2, chunker.chunk2_uncompressed, False, 22))
-            # DESATIVANDO o Delta no Chunk 3 (Raw Data) para não destruir compressão de áudio
-            z_futures.append(executor.submit(worker_compress, 3, chunker.chunk3_raw, False, 22))
+            # Chunk3 (raw data: MIPS code, audio, geometry) — delta dist=4 colapsa ponteiros à zero
+            z_futures.append(executor.submit(worker_compress, 3, chunker.chunk3_raw, True, 22))
             
             results = {1: None, 2: None, 3: None}
             for future in concurrent.futures.as_completed(z_futures):
