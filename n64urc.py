@@ -611,19 +611,9 @@ class DataChunker:
         bootcode_size = min(4096, ROM_SIZE)
         self.chunk1_header = self.data[:bootcode_size]
         
-        print("[INFO] Escaneando ROM usando multiprocessing (ProcessPoolExecutor)...")
-        num_workers = os.cpu_count() or 4
-        stride = max(1024, (ROM_SIZE - bootcode_size) // num_workers)
-        
-        futures = []
-        with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers) as executor:
-            for i in range(bootcode_size, ROM_SIZE, stride):
-                end_pos = min(i + stride, ROM_SIZE)
-                futures.append(executor.submit(worker_scan, self.data, i, end_pos))
-                
-            all_blocks = []
-            for future in concurrent.futures.as_completed(futures):
-                all_blocks.extend(future.result())
+        print("[INFO] Escaneando ROM (scan linear in-process)...")
+        # Scan linear: ProcessPoolExecutor picklaria 32MB p/ cada subprocess — lento demais!
+        all_blocks = worker_scan(self.data, bootcode_size, ROM_SIZE)
                 
         # Filtra falsos positivos e overlays
         all_blocks.sort(key=lambda x: x['offset'])
