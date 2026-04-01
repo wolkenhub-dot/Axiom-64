@@ -7,6 +7,7 @@ import hashlib
 import concurrent.futures
 import lzma
 import contextlib
+import glob
 from typing import List, Tuple, Dict, Any
 
 @contextlib.contextmanager
@@ -756,16 +757,28 @@ def main():
     args = parser.parse_args()
 
     mode = None
-    files = []
+    raw_files = []
     if args.compress:
         mode = 'compress'
-        files = [f for f in args.compress if f.lower().endswith(('.z64', '.n64', '.v64', '.rom'))]
+        raw_files = args.compress
     elif args.extract:
         mode = 'extract'
-        files = [f for f in args.extract if f.lower().endswith('.n64z')]
+        raw_files = args.extract
     else:
         parser.print_help()
         return
+
+    expanded_files = []
+    for pattern in raw_files:
+        if '*' in pattern or '?' in pattern:
+            expanded_files.extend(glob.glob(pattern))
+        else:
+            expanded_files.append(pattern)
+
+    if mode == 'compress':
+        files = [f for f in expanded_files if f.lower().endswith(('.z64', '.n64', '.v64', '.rom'))]
+    else:
+        files = [f for f in expanded_files if f.lower().endswith('.n64z')]
 
     if not files:
         print("[ERRO] Nenhum arquivo válido encontrado para processamento.")
