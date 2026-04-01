@@ -58,6 +58,13 @@ def delta_encode(data: bytes) -> bytearray:
     out[q:2*q] = m[1::4]
     out[2*q:3*q] = m[2::4]
     out[3*q:length] = m[3::4]
+    
+    # Subtractive delta over transposed arrays bounds for intense 0x00 creation
+    for block in range(4):
+        start = block * q
+        for i in range(start + q - 1, start, -1):
+            out[i] = (out[i] - out[i-1]) & 0xFF
+            
     return out
 
 def delta_decode(data: bytes) -> bytearray:
@@ -65,7 +72,14 @@ def delta_decode(data: bytes) -> bytearray:
     length = len(data)
     out = bytearray(length)
     q = length // 4
-    m = memoryview(data)
+    
+    transposed = bytearray(data)
+    for block in range(4):
+        start = block * q
+        for i in range(start + 1, start + q):
+            transposed[i] = (transposed[i] + transposed[i-1]) & 0xFF
+            
+    m = memoryview(transposed)
     out[0::4] = m[0:q]
     out[1::4] = m[q:2*q]
     out[2::4] = m[2*q:3*q]
@@ -75,29 +89,66 @@ def delta_decode(data: bytes) -> bytearray:
 import math
 
 def try_encode_webp(uncomp_data: bytearray) -> bytes:
-    """Tenta converter textura raw descomprimida para WebP Lossless"""
+    """Tenta converter textura raw descomprimida para WebP Lossless adivinhando o formato 2D"""
     if not HAS_PIL:
         return None
     size = len(uncomp_data)
-    if size < 2048:
+    # Ignora blocos muito pequenos ou grandes demais (maiores que 128KB não são texturas no N64)
+    if size < 512 or size > 131072:
         return None
         
+    import zlib
+    if len(zlib.compress(uncomp_data, level=1)) > size * 0.90:
+        # Se os dados não têm nem redundância básica 1D (alta entropia), WebP espacial vai falhar ou travar a CPU
+        return None
+        
+    best_webp = None
+    best_ratio = 0.85 # Exige uma economia de pelo menos 15% para valer a pena a estrutura extra
+    valid_widths = [16, 32, 64] # Limitando matrizes pra evitar hang em código MIPS de alta entropia
+    
+    def test_compress(mode, w, h):
+        nonlocal best_webp, best_ratio
+        try:
+            img = Image.frombytes(mode, (w, h), uncomp_data)
+            buf = io.BytesIO()
+            # Fast check first
+            img.save(buf, format='webp', lossless=True, quality=100, method=0)
+            if len(buf.getvalue()) < size * 0.95:
+                # Se for minimamente promissor espacialmente, aperta o cinto e comprime pra valer
+                buf = io.BytesIO()
+                img.save(buf, format='webp', lossless=True, quality=100, method=6, exact=True)
+                webp_data = buf.getvalue()
+                if len(webp_data) < size * best_ratio:
+                    best_webp = webp_data
+                    best_ratio = len(webp_data) / size
+        except Exception: pass
+
+    # Mode L (1 byte per pixel: I8/CI8/I4/CI4)
+    for w in valid_widths:
+        if size % w == 0:
+            h = size // w
+            if 4 <= h <= 1024:
+                test_compress('L', w, h)
+                
+    # Mode LA/RGB16 (2 bytes per pixel: RGBA16 / IA16)
+    if size % 2 == 0:
+        pixels = size // 2
+        for w in valid_widths:
+            if pixels % w == 0:
+                h = pixels // w
+                if 4 <= h <= 1024:
+                    test_compress('LA', w, h)
+
+    # Mode RGBA (4 bytes per pixel: RGBA32)
     if size % 4 == 0:
         pixels = size // 4
-        # Tenta adivinhar se é uma textura quadrada perfeita
-        w = int(math.sqrt(pixels))
-        if w * w == pixels:
-            try:
-                img = Image.frombytes('RGBA', (w, w), uncomp_data)
-                buf = io.BytesIO()
-                img.save(buf, format='webp', lossless=True)
-                webp_data = buf.getvalue()
-                # Exige uma economia de pelo menos 30% para valer a pena
-                if len(webp_data) < size * 0.7:
-                    return webp_data
-            except Exception:
-                pass
-    return None
+        for w in valid_widths:
+            if pixels % w == 0:
+                h = pixels // w
+                if 4 <= h <= 512:
+                    test_compress('RGBA', w, h)
+                    
+    return best_webp
 
 def worker_scan(full_data: bytes, start: int, end: int) -> List[Dict]:
     """Worker paralelo para caça de MIO0 e Yay0 e WebP conversão"""
@@ -156,7 +207,10 @@ def worker_scan(full_data: bytes, start: int, end: int) -> List[Dict]:
 def worker_compress(chunk_id: int, data: bytes, is_delta: bool, level: int) -> Tuple[int, bool, bytes, int]:
     """Worker paralelo para compressão LZMA"""
     data_to_compress = delta_encode(data) if is_delta else data
-    comp = lzma.compress(data_to_compress, preset=9 | lzma.PRESET_EXTREME)
+    lzma_filters = [
+        {"id": lzma.FILTER_LZMA2, "preset": 9 | lzma.PRESET_EXTREME, "dict_size": 32 * 1024 * 1024, "lc": 3, "lp": 0, "pb": 2}
+    ]
+    comp = lzma.compress(data_to_compress, format=lzma.FORMAT_XZ, filters=lzma_filters)
     return (chunk_id, is_delta, comp, len(data_to_compress))
 
 def worker_decompress(chunk_id: int, compressed_data: bytes, uncompressed_size: int, is_delta: bool) -> Tuple[int, bytes]:
