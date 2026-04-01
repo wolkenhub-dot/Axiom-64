@@ -272,12 +272,18 @@ class Mio0Codec:
             max_len = min(18, size - pos)
             if max_len >= 3:
                 limit_pos = max(0, pos - 4096)
-                if data.find(data[pos:pos+3], limit_pos, pos + 2) != -1:
-                    for test_len in range(max_len, 2, -1):
-                        f_idx = data.rfind(data[pos:pos+test_len], limit_pos, pos + test_len - 1)
-                        if f_idx != -1 and f_idx < pos:
-                            best_len = test_len
-                            best_offset = pos - f_idx
+                target = data[pos:pos+3]
+                f_idx = data.rfind(target, limit_pos, pos + 2)
+                if f_idx != -1 and f_idx < pos:
+                    best_len = 3
+                    best_offset = pos - f_idx
+                    while best_len < max_len:
+                        next_target = data[pos:pos+best_len+1]
+                        next_idx = data.rfind(next_target, limit_pos, pos + best_len)
+                        if next_idx != -1 and next_idx < pos:
+                            best_len += 1
+                            best_offset = pos - next_idx
+                        else:
                             break
 
             if best_len >= 3:
@@ -366,12 +372,18 @@ class Yay0Codec:
             max_len = min(255 + 18, size - pos)
             if max_len >= 3:
                 limit_pos = max(0, pos - 4096)
-                if data.find(data[pos:pos+3], limit_pos, pos + 2) != -1:
-                    for test_len in range(max_len, 2, -1):
-                        f_idx = data.rfind(data[pos:pos+test_len], limit_pos, pos + test_len - 1)
-                        if f_idx != -1 and f_idx < pos:
-                            best_len = test_len
-                            best_offset = pos - f_idx
+                target = data[pos:pos+3]
+                f_idx = data.rfind(target, limit_pos, pos + 2)
+                if f_idx != -1 and f_idx < pos:
+                    best_len = 3
+                    best_offset = pos - f_idx
+                    while best_len < max_len:
+                        next_target = data[pos:pos+best_len+1]
+                        next_idx = data.rfind(next_target, limit_pos, pos + best_len)
+                        if next_idx != -1 and next_idx < pos:
+                            best_len += 1
+                            best_offset = pos - next_idx
+                        else:
                             break
 
             if best_len >= 3:
@@ -464,12 +476,18 @@ class Yaz0Codec:
             max_len = min(255 + 18, size - pos)
             if max_len >= 3:
                 limit_pos = max(0, pos - 4096)
-                if data.find(data[pos:pos+3], limit_pos, pos + 2) != -1:
-                    for test_len in range(max_len, 2, -1):
-                        f_idx = data.rfind(data[pos:pos+test_len], limit_pos, pos + test_len - 1)
-                        if f_idx != -1 and f_idx < pos:
-                            best_len = test_len
-                            best_offset = pos - f_idx
+                target = data[pos:pos+3]
+                f_idx = data.rfind(target, limit_pos, pos + 2)
+                if f_idx != -1 and f_idx < pos:
+                    best_len = 3
+                    best_offset = pos - f_idx
+                    while best_len < max_len:
+                        next_target = data[pos:pos+best_len+1]
+                        next_idx = data.rfind(next_target, limit_pos, pos + best_len)
+                        if next_idx != -1 and next_idx < pos:
+                            best_len += 1
+                            best_offset = pos - next_idx
+                        else:
                             break
 
             if best_len >= 3:
