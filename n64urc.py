@@ -6,7 +6,18 @@ import io
 import hashlib
 import concurrent.futures
 import lzma
+import contextlib
 from typing import List, Tuple, Dict, Any
+
+@contextlib.contextmanager
+def suppress_stdout():
+    with open(os.devnull, "w") as devnull:
+        old_stdout = sys.stdout
+        sys.stdout = devnull
+        try:  
+            yield
+        finally:
+            sys.stdout = old_stdout
 
 try:
     import zstandard as zstd
@@ -19,6 +30,12 @@ try:
     HAS_PIL = True
 except ImportError:
     HAS_PIL = False
+
+try:
+    from tqdm import tqdm
+except ImportError:
+    print("Erro: A biblioteca 'tqdm' não está instalada. Execute: pip install tqdm")
+    sys.exit(1)
 
 
 # ==========================================
@@ -565,7 +582,15 @@ class N64ZContainer:
         return header + compressed
 
     @classmethod
-    def compress_rom(cls, input_file: str, output_file: str):
+    def compress_rom(cls, input_file: str, output_file: str, quiet: bool = False):
+        if quiet:
+            with suppress_stdout():
+                cls._compress_rom_inner(input_file, output_file)
+        else:
+            cls._compress_rom_inner(input_file, output_file)
+
+    @classmethod
+    def _compress_rom_inner(cls, input_file: str, output_file: str):
         print(f"=== Iniciando N64-URC GOD TIER ===")
         print(f"Lendo {input_file}...")
         with open(input_file, "rb") as f:
@@ -619,7 +644,15 @@ class N64ZContainer:
 
 
     @classmethod
-    def extract_rom(cls, input_file: str, output_file: str):
+    def extract_rom(cls, input_file: str, output_file: str, quiet: bool = False):
+        if quiet:
+            with suppress_stdout():
+                cls._extract_rom_inner(input_file, output_file)
+        else:
+            cls._extract_rom_inner(input_file, output_file)
+
+    @classmethod
+    def _extract_rom_inner(cls, input_file: str, output_file: str):
         print(f"=== Extraindo God Tier .n64z (N64-URC) ===")
         print(f"Lendo {input_file}...")
         with open(input_file, "rb") as f:
@@ -716,23 +749,45 @@ class N64ZContainer:
 
 def main():
     parser = argparse.ArgumentParser(description="N64-URC God Tier: Nintendo 64 Ultimate ROM Compressor")
-    parser.add_argument("-c", "--compress", metavar="IN.z64", help="Comprime uma ROM para o formato .n64z")
-    parser.add_argument("-x", "--extract", metavar="IN.n64z", help="Extrai um arquivo .n64z para .z64")
-    parser.add_argument("-o", "--output", metavar="OUT", help="Arquivo de saída (Opcional)")
+    parser.add_argument("-c", "--compress", nargs='+', metavar="IN.z64", help="Comprime ROMs para o formato .n64z")
+    parser.add_argument("-x", "--extract", nargs='+', metavar="IN.n64z", help="Extrai arquivos .n64z para .z64")
+    parser.add_argument("-o", "--output", metavar="OUT", help="Arquivo de saída (Apenas para arquivo único)")
 
     args = parser.parse_args()
 
+    mode = None
+    files = []
     if args.compress:
-        input_f = args.compress
-        output_f = args.output if args.output else input_f + ".n64z"
-        N64ZContainer.compress_rom(input_f, output_f)
+        mode = 'compress'
+        files = [f for f in args.compress if f.lower().endswith(('.z64', '.n64', '.v64', '.rom'))]
     elif args.extract:
-        input_f = args.extract
-        output_f = args.output if args.output else input_f.replace(".n64z", "") + "_rec.z64"
-        N64ZContainer.extract_rom(input_f, output_f)
+        mode = 'extract'
+        files = [f for f in args.extract if f.lower().endswith('.n64z')]
     else:
         parser.print_help()
+        return
 
+    if not files:
+        print("[ERRO] Nenhum arquivo válido encontrado para processamento.")
+        return
+
+    is_batch = len(files) > 1
+    if is_batch and args.output:
+        print("[AVISO] Arquivo de saída customizado (-o) ignorado. Modo Batch usa nomenclatura automática.")
+        args.output = None
+
+    iterator = tqdm(files, desc="Processando Fullset", unit="ROM") if is_batch else files
+
+    for f in iterator:
+        if is_batch:
+            iterator.set_postfix(file=os.path.basename(f))
+            
+        out_file = args.output if not is_batch and args.output else None
+        
+        if mode == 'compress':
+            N64ZContainer.compress_rom(f, out_file or f + ".n64z", quiet=is_batch)
+        else:
+            N64ZContainer.extract_rom(f, out_file or f.replace(".n64z", "") + "_rec.z64", quiet=is_batch)
 
 if __name__ == "__main__":
     main()
