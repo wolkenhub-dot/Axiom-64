@@ -218,7 +218,9 @@ class N64URCGUI:
             out_file = file_path + ".n64z"
             n64urc.N64ZContainer.compress_rom(file_path, out_file, quiet=False)
         else:
-            out_file = file_path.replace(".n64z", "") + "_rec.z64"
+            out_file = file_path.replace(".n64z", "")
+            if not out_file.lower().endswith(('.z64', '.n64', '.v64', '.rom')):
+                out_file += ".z64"
             n64urc.N64ZContainer.extract_rom(file_path, out_file, quiet=False)
 
     def _process_batch(self, mode, directory):
@@ -245,7 +247,9 @@ class N64URCGUI:
                 out_file = f + ".n64z"
                 n64urc.N64ZContainer.compress_rom(f, out_file, quiet=True) # Usa Quiet mode ativado
             else:
-                out_file = f.replace(".n64z", "") + "_rec.z64"
+                out_file = f.replace(".n64z", "")
+                if not out_file.lower().endswith(('.z64', '.n64', '.v64', '.rom')):
+                    out_file += ".z64"
                 n64urc.N64ZContainer.extract_rom(f, out_file, quiet=True)
 
             self.msg_queue.put(('progress_step', 1))

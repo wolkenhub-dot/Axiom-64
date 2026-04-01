@@ -717,6 +717,8 @@ class N64ZContainer:
                 res = future.result()
                 if res:
                     offset, csize, block = res
+                    if len(block) != csize:
+                        block = block.ljust(csize, b'\x00')[:csize]
                     final_rom[offset:offset+csize] = block
 
         # Juntando o RAW (Chunk 3) e os blocos reconstruídos
@@ -726,13 +728,19 @@ class N64ZContainer:
         for entry in recon_map:
             raw_len = entry['offset'] - curr_offset
             if raw_len > 0:
-                final_rom[curr_offset:curr_offset+raw_len] = chunk3[raw_pos:raw_pos+raw_len]
+                slice_data = chunk3[raw_pos:raw_pos+raw_len]
+                if len(slice_data) != raw_len:
+                    slice_data = slice_data.ljust(raw_len, b'\x00')[:raw_len]
+                final_rom[curr_offset:curr_offset+raw_len] = slice_data
                 raw_pos += raw_len
             curr_offset = entry['offset'] + entry['comp_size']
             
         if raw_pos < len(chunk3) and curr_offset < original_size:
             rem_len = min(len(chunk3) - raw_pos, original_size - curr_offset)
-            final_rom[curr_offset:curr_offset+rem_len] = chunk3[raw_pos:raw_pos+rem_len]
+            slice_data = chunk3[raw_pos:raw_pos+rem_len]
+            if len(slice_data) != rem_len:
+                slice_data = slice_data.ljust(rem_len, b'\x00')[:rem_len]
+            final_rom[curr_offset:curr_offset+rem_len] = slice_data
 
         new_sha256 = hashlib.sha256(final_rom).digest()
         print(f"[INFO] SHA-256 Esperado: {original_sha256.hex()}")
@@ -800,7 +808,10 @@ def main():
         if mode == 'compress':
             N64ZContainer.compress_rom(f, out_file or f + ".n64z", quiet=is_batch)
         else:
-            N64ZContainer.extract_rom(f, out_file or f.replace(".n64z", "") + "_rec.z64", quiet=is_batch)
+            final_out = out_file or f.replace(".n64z", "")
+            if not final_out.lower().endswith(('.z64', '.n64', '.v64', '.rom')):
+                final_out += ".z64"
+            N64ZContainer.extract_rom(f, final_out, quiet=is_batch)
 
 if __name__ == "__main__":
     main()
