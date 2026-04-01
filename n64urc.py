@@ -89,20 +89,26 @@ def worker_scan(full_data: bytes, start: int, end: int) -> List[Dict]:
         magic = full_data[pos:pos+4]
         is_mio = (magic == b'MIO0')
         is_yay = (magic == b'Yay0')
+        is_yaz = (magic == b'Yaz0')
         
-        if is_mio or is_yay:
+        if is_mio or is_yay or is_yaz:
             try:
                 if is_mio:
                     uncomp, comp_size = Mio0Codec.decode(full_data, pos)
                     ctype = b'M'
-                else:
+                elif is_yay:
                     uncomp, comp_size = Yay0Codec.decode(full_data, pos)
                     ctype = b'Y'
+                else:
+                    uncomp, comp_size = Yaz0Codec.decode(full_data, pos)
+                    ctype = b'Z'
                     
                 webp_data = try_encode_webp(uncomp)
                 if webp_data:
                     final_data = webp_data
-                    ctype = b'W' if is_mio else b'X'
+                    if is_mio: ctype = b'W'
+                    elif is_yay: ctype = b'X'
+                    else: ctype = b'V'
                 else:
                     final_data = uncomp
                     
@@ -138,7 +144,7 @@ def worker_decompress(chunk_id: int, compressed_data: bytes, uncompressed_size: 
 def worker_reconstruct(offset: int, comp_size: int, ctype: bytes, chunk2_data: bytes) -> Tuple[int, int, bytes]:
     """Worker paralelo para desfazer texturas WebP e recomprimir LZ77 MIO0/Yay0"""
     try:
-        if ctype in [b'W', b'X']:
+        if ctype in [b'W', b'X', b'V']:
             if not HAS_PIL:
                 raise Exception("Biblioteca Pillow ausente para decodificar textura WebP.")
             buf = io.BytesIO(chunk2_data)
@@ -149,8 +155,10 @@ def worker_reconstruct(offset: int, comp_size: int, ctype: bytes, chunk2_data: b
             
         if ctype in [b'M', b'W']:
             recomp_block = Mio0Codec.encode(uncomp_data, original_compressed_size=comp_size)
-        else:
+        elif ctype in [b'Y', b'X']:
             recomp_block = Yay0Codec.encode(uncomp_data, original_compressed_size=comp_size)
+        else:
+            recomp_block = Yaz0Codec.encode(uncomp_data, original_compressed_size=comp_size)
             
         if len(recomp_block) > comp_size:
             recomp_block = recomp_block[:comp_size]
@@ -382,6 +390,100 @@ class Yay0Codec:
         return bytes(block)
 
 
+class Yaz0Codec:
+    @staticmethod
+    def decode(data: bytes, offset: int) -> Tuple[bytearray, int]:
+        magic, decomp_size = struct.unpack(">4sI", data[offset:offset + 8])
+        if magic != b'Yaz0': raise ValueError("Not Yaz0")
+
+        out = bytearray()
+        pos = offset + 16
+        layout_bit_idx = 0
+        layout_byte = 0
+
+        while len(out) < decomp_size:
+            if layout_bit_idx == 0:
+                layout_byte = data[pos]
+                pos += 1
+                layout_bit_idx = 8
+
+            bit = (layout_byte >> 7) & 1
+            layout_byte = (layout_byte << 1) & 0xFF
+            layout_bit_idx -= 1
+
+            if bit == 1:
+                out.append(data[pos])
+                pos += 1
+            else:
+                match_bytes = struct.unpack(">H", data[pos:pos + 2])[0]
+                pos += 2
+                length = match_bytes >> 12
+                match_offset = (match_bytes & 0x0FFF) + 1
+                if length == 0:
+                    length = data[pos] + 18
+                    pos += 1
+                else: length += 2
+
+                start = len(out) - match_offset
+                for i in range(length):
+                    out.append(out[start + i])
+
+        consumed = pos - offset
+        if consumed % 16 != 0: consumed += (16 - (consumed % 16))
+        return out, consumed
+
+    @staticmethod
+    def encode(data: bytes, original_compressed_size: int = 0) -> bytes:
+        comp_data = bytearray()
+        pos, size = 0, len(data)
+
+        layout_byte = 0
+        layout_bit = 7
+        group_data = bytearray()
+        
+        while pos < size:
+            best_len, best_offset = 0, 0
+            max_len = min(255 + 18, size - pos)
+            limit = min(pos, 4096)
+            for match_off in range(1, limit + 1):
+                match_len = 0
+                while match_len < max_len and data[pos - match_off + match_len] == data[pos + match_len]:
+                    match_len += 1
+                if match_len > best_len:
+                    best_len = match_len
+                    best_offset = match_off
+                    if best_len == max_len: break
+
+            if best_len >= 3:
+                layout_byte &= ~(1 << layout_bit)
+                if best_len <= 17:
+                    group_data.extend(struct.pack(">H", ((best_len - 2) << 12) | (best_offset - 1)))
+                else:
+                    group_data.extend(struct.pack(">H", best_offset - 1))
+                    group_data.append(best_len - 18)
+                pos += best_len
+            else:
+                layout_byte |= (1 << layout_bit)
+                group_data.append(data[pos])
+                pos += 1
+
+            layout_bit -= 1
+            if layout_bit < 0 or pos >= size:
+                comp_data.append(layout_byte)
+                comp_data.extend(group_data)
+                layout_byte = 0
+                layout_bit = 7
+                group_data.clear()
+
+        header = struct.pack(">4sIII", b'Yaz0', size, 0, 0)
+        block = header + comp_data
+
+        while len(block) % 16 != 0: block.append(0)
+        if original_compressed_size > 0 and len(block) < original_compressed_size:
+            block += b'\x00' * (original_compressed_size - len(block))
+        return bytes(block)
+
+
 # ==========================================
 # Chunker e Container Principal
 # ==========================================
@@ -423,10 +525,11 @@ class DataChunker:
                 last_end = b['offset'] + b['comp_size']
         
         raw_start = bootcode_size
-        cw, cx = 0, 0
+        cw, cx, cv = 0, 0, 0
         for b in valid_blocks:
             if b['type'] == b'W': cw += 1
             if b['type'] == b'X': cx += 1
+            if b['type'] == b'V': cv += 1
             
             if b['offset'] > raw_start:
                 self.chunk3_raw.extend(self.data[raw_start:b['offset']])
@@ -446,7 +549,7 @@ class DataChunker:
             self.chunk3_raw.extend(self.data[raw_start:])
             
         print(f"[INFO] Escaneamento finalizado ({len(valid_blocks)} blocos isolados).")
-        print(f"       => {cw+cx} texturas comprimidas em WebP geradas pelo transcodificador.")
+        print(f"       => {cw+cx+cv} texturas comprimidas em WebP geradas pelo transcodificador.")
         print(f"       Chunk 1 (Bootcode): {len(self.chunk1_header)} bytes")
         print(f"       Chunk 2 (Descomp. + WebP): {len(self.chunk2_uncompressed)} bytes")
         print(f"       Chunk 3 (Raw Delta MIPS): {len(self.chunk3_raw)} bytes")
