@@ -302,7 +302,7 @@ class Mio0Codec:
         comp_offset = 16 + len(layout_bytes)
         uncomp_offset = comp_offset + len(comp_data)
         header = struct.pack(">4sIII", b'MIO0', size, comp_offset, uncomp_offset)
-        block = header + layout_bytes + comp_data + uncomp_data
+        block = bytearray(header) + layout_bytes + comp_data + uncomp_data
         
         while len(block) % 16 != 0: block.append(0)
         if original_compressed_size > 0 and len(block) < original_compressed_size:
@@ -400,7 +400,7 @@ class Yay0Codec:
         link_offset = 16 + len(layout_bytes)
         nonlink_offset = link_offset + len(link_data)
         header = struct.pack(">4sIII", b'Yay0', size, link_offset, nonlink_offset)
-        block = header + layout_bytes + link_data + nonlink_data
+        block = bytearray(header) + layout_bytes + link_data + nonlink_data
 
         while len(block) % 16 != 0: block.append(0)
         if original_compressed_size > 0 and len(block) < original_compressed_size:
@@ -494,7 +494,7 @@ class Yaz0Codec:
                 group_data.clear()
 
         header = struct.pack(">4sIII", b'Yaz0', size, 0, 0)
-        block = header + comp_data
+        block = bytearray(header) + comp_data
 
         while len(block) % 16 != 0: block.append(0)
         if original_compressed_size > 0 and len(block) < original_compressed_size:
